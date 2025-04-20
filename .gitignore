@@ -7,3 +7,5 @@ share/
 __pycache__
 .env
 .vscode/
+mp3/
+srt/
