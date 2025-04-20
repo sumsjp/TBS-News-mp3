@@ -17,6 +17,7 @@ base_dir = os.path.join(src_dir, '../')
 # under base_dir
 srt_dir = os.path.join(base_dir, 'srt/')
 mp3_dir = os.path.join(base_dir, 'mp3/')
+mp3_dir = os.path.join(base_dir, 'notes/')
 readme_file = os.path.join(base_dir, 'README.md')  
 
 # under src_dir
@@ -26,17 +27,45 @@ csv_file = os.path.join(src_dir, 'video_list.csv')
 # === 設定頻道網址 ===
 channel_url = 'https://www.youtube.com/playlist?list=PLhoNlZaJqDLaPgn1NqC9FxMPnlkemRpyr'
 
+def rename_title(title):
+    # Extract the time of day (朝/昼/夜)
+    time_of_day = ""
+    if "朝の" in title:
+        time_of_day = "朝"
+    elif "昼の" in title:
+        time_of_day = "昼"
+    elif "夜の" in title:
+        time_of_day = "夜"
+    
+    # Extract the date (月日)
+    date_match = re.search(r'（(\d+)月(\d+)日）', title)
+    if date_match:
+        month = date_match.group(1).zfill(2)
+        day = date_match.group(2).zfill(2)
+        formatted_date = f"{month}-{day}"
+        
+        # Construct the new title
+        return f"TBS_News_{formatted_date}_{time_of_day}"
+    
+    # Return original title if pattern doesn't match
+    return title
 
 def update_list():
     # === yt-dlp 參數設定 ===
     videos = get_video_list(channel_url)
     # === 建立新影片的DataFrame ===
     new_videos = []
-    for video in reversed(videos):
+    for video in videos:
+        # 過濾掉時間超過1小時的影片或live影片
+        duration = video.get('duration')
+        if duration is None or duration > 3600:
+            continue
+
         video_id = video.get('id')
+        video_title = video.get('title')
         new_videos.append({
             'id': video_id,
-            'title': video.get('title'),
+            'title': rename_title(video_title),
             'url': f"https://www.youtube.com/watch?v={video_id}",
             'date': video.get('upload_date', 'unknown')
         })
@@ -193,6 +222,6 @@ def transcribe_srt():
 if __name__ == '__main__':
     logger.info("開始執行更新程序")
     df, new_df = update_list()
-    download_mp3(df)  # Changed from download_audio
-    transcribe_srt()
+    # download_mp3(df)  # Changed from download_audio
+    # transcribe_srt()
     logger.info("更新程序完成")

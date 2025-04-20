@@ -6,6 +6,7 @@ share/
 
 __pycache__
 .env
+.venv/
 .vscode/
 mp3/
 srt/
