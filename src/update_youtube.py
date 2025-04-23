@@ -3,6 +3,7 @@ import pandas as pd
 import time
 import ssl
 import re
+import shutil
 
 from lib.mytube import get_video_list, download_mp3_file, transcribe_audio
 from lib.mylog import setup_logger
@@ -18,6 +19,9 @@ base_dir = os.path.join(src_dir, '../')
 srt_dir = os.path.join(base_dir, 'srt/')
 mp3_dir = os.path.join(base_dir, 'mp3/')
 readme_file = os.path.join(base_dir, 'README.md')  
+
+# google dir
+google_dir = "E:/My Drive/AUDIO/TBS-News/"
 
 # under src_dir
 csv_file = os.path.join(src_dir, 'video_list.csv')
@@ -159,6 +163,10 @@ def download_mp3(df):  # Changed from download_audio
     return df
 
 def transcribe_srt():
+    """
+    將 mp3 檔案轉換為 srt 字幕檔
+    每次執行最多處理 max_transcriptions 個檔案
+    """
     # 確保 summary 目錄存在
     os.makedirs(srt_dir, exist_ok=True)
     
@@ -167,8 +175,14 @@ def transcribe_srt():
     
     # 計數器
     processed_count = 0
+    max_transcriptions = 3  # 設定最大轉換次數
     
     for mp3_file_name in mp3_files:
+        # 檢查是否達到最大轉換次數
+        if processed_count >= max_transcriptions:
+            logger.info(f"已達到最大轉換次數 ({max_transcriptions})")
+            break
+            
         # 取得檔名（不含副檔名）
         fname = os.path.splitext(mp3_file_name)[0]
         
@@ -180,6 +194,7 @@ def transcribe_srt():
             try:
                 transcribe_audio(mp3_file, srt_file)
                 processed_count += 1
+                logger.info(f"已完成 {processed_count}/{max_transcriptions} 個轉換")
                 
             except Exception as e:
                 logger.error(f"transcribe_srt: 字幕產生失敗 {fname}: {str(e)}")
@@ -190,9 +205,20 @@ def transcribe_srt():
     else:
         logger.info("transcribe_srt: 沒有需要處理的檔案")
 
+def copy_files():
+    # 將 mp3_dir 和 srt_dir 下的所有檔案複製到 google_dir
+    for src_dir in [mp3_dir, srt_dir]:
+        for file_name in os.listdir(src_dir):
+            src_file = os.path.join(src_dir, file_name)
+            dst_file = os.path.join(google_dir, file_name)
+            if not os.path.exists(dst_file):
+                shutil.copyfile(src_file, dst_file)  # 改用 copyfile
+                logger.info(f"已複製檔案：{file_name} 到 {google_dir}")
+
 if __name__ == '__main__':
     logger.info("開始執行更新程序")
     df, new_df = update_list()
     download_mp3(df)  # Changed from download_audio
     transcribe_srt()
+    copy_files()
     logger.info("更新程序完成")
