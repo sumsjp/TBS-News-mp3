@@ -1,4 +1,4 @@
 pandas
 yt-dlp
 requests
-whisper-openai 
+faster-whisper

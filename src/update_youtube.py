@@ -3,6 +3,8 @@ import pandas as pd
 import time
 import ssl
 import re
+import glob
+import shutil
 
 from lib.mytube import get_video_list, download_mp3_file, transcribe_audio
 from lib.mylog import setup_logger
@@ -17,8 +19,11 @@ base_dir = os.path.join(src_dir, '../')
 # under base_dir
 srt_dir = os.path.join(base_dir, 'srt/')
 mp3_dir = os.path.join(base_dir, 'mp3/')
-mp3_dir = os.path.join(base_dir, 'notes/')
+notes_dir = os.path.join(base_dir, 'notes/')
 readme_file = os.path.join(base_dir, 'README.md')  
+
+# google dir
+google_dir = "J:/我的雲端硬碟/AUDIO/TBS-News/"
 
 # under src_dir
 csv_file = os.path.join(src_dir, 'video_list.csv')
@@ -102,54 +107,6 @@ def update_list():
         new_df = pd.DataFrame()
         return existing_df, new_df
 
-
-def update_date(df):
-    """
-    Update unknown or missing upload dates in the DataFrame
-    - Processes from the latest entries backwards
-    - Updates entries where date is 'unknown'
-    - Limits to maximum 10 API calls
-    - Saves updated data back to CSV
-    """
-    if df.empty:
-        return df
-        
-    update_count = 0
-    max_updates = 10
-    
-    # Process from newest to oldest
-    for idx in reversed(df.index):
-        if update_count >= max_updates:
-            logger.info(f"已達到最大更新數量 ({max_updates})")
-            break
-            
-        video_id = df.loc[idx, 'id']
-        current_date = df.loc[idx, 'date']
-        
-        if current_date == 'unknown':
-            logger.info(f"更新日期中：{idx}:{video_id}")
-            try:
-                new_date = get_upload_date(video_id)
-                if new_date != 'unknown':
-                    df.loc[idx, 'date'] = new_date
-                    update_count += 1
-                    logger.info(f"更新成功：{idx}:{video_id} -> {new_date}")
-                else:
-                    logger.warning(f"無法取得日期：{idx}:{video_id}")
-            except Exception as e:
-                logger.error(f"更新日期失敗 {idx}:{video_id}: {str(e)}")
-                continue
-    
-    if update_count > 0:
-        # Save updates back to CSV
-        df.to_csv(csv_file, index=False)
-        logger.info(f"完成 {update_count} 個影片的日期更新")
-    else:
-        logger.info("沒有需要更新的日期")
-        
-    return df
-
-
 def download_mp3(df):  # Changed from download_audio
     # 確保 video_dir 存在
     os.makedirs(mp3_dir, exist_ok=True)
@@ -188,6 +145,9 @@ def download_mp3(df):  # Changed from download_audio
     return df
 
 def transcribe_srt():
+    """
+    將 MP3 檔案轉換為 SRT 字幕檔，一次最多處理 3 個檔案
+    """
     # 確保 summary 目錄存在
     os.makedirs(srt_dir, exist_ok=True)
     
@@ -196,8 +156,14 @@ def transcribe_srt():
     
     # 計數器
     processed_count = 0
+    max_process = 3  # 設定最大處理數量為 3
     
     for mp3_file_name in mp3_files:
+        # 檢查是否達到最大處理數量
+        if processed_count >= max_process:
+            logger.info(f"已達到最大處理數量 ({max_process})")
+            break
+            
         # 取得檔名（不含副檔名）
         fname = os.path.splitext(mp3_file_name)[0]
         
@@ -219,9 +185,90 @@ def transcribe_srt():
     else:
         logger.info("transcribe_srt: 沒有需要處理的檔案")
 
+def write_notes(df):
+    """
+    為每個影片建立 notes 文件，內容為 YouTube URL
+    如果文件已存在則跳過
+    """
+    # 確保 notes 目錄存在
+    os.makedirs(notes_dir, exist_ok=True)
+    
+    # 計數器
+    created_count = 0
+    
+    # 處理每個影片
+    for _, row in df.iterrows():
+        title = row['title']
+        url = row['url']
+        
+        # 建立 notes 文件路徑
+        notes_file = os.path.join(notes_dir, f"{title}.Notes.txt")
+        
+        # 如果文件不存在，則建立
+        if not os.path.exists(notes_file):
+            try:
+                with open(notes_file, 'w', encoding='utf-8') as f:
+                    f.write(url)
+                created_count += 1
+                logger.info(f"已建立筆記文件：{notes_file}")
+            except Exception as e:
+                logger.error(f"建立筆記文件失敗 {notes_file}: {str(e)}")
+    
+    if created_count > 0:
+        logger.info(f"write_notes: 完成 {created_count} 個筆記文件")
+    else:
+        logger.info("write_notes: 沒有需要建立的筆記文件")
+
+def copy_files():
+    """
+    將 mp3、notes、srt 目錄下的檔案複製到 google_dir
+    如果目標檔案已存在則跳過
+    """    
+    # 確保目標目錄存在
+    os.makedirs(google_dir, exist_ok=True)
+    
+    # 計數器
+    copied_count = 0
+    
+    # 複製函數
+    def copy_if_not_exists(src_file, dst_dir):
+        nonlocal copied_count
+        filename = os.path.basename(src_file)
+        dst_file = os.path.join(dst_dir, filename)
+        
+        if not os.path.exists(dst_file):
+            try:
+                shutil.copy2(src_file, dst_file)
+                copied_count += 1
+                logger.info(f"已複製：{filename}")
+            except Exception as e:
+                logger.error(f"複製失敗 {filename}: {str(e)}")
+    
+    # 複製 mp3 檔案
+    mp3_files = glob.glob(os.path.join(mp3_dir, "*.mp3"))
+    for mp3_file in mp3_files:
+        copy_if_not_exists(mp3_file, google_dir)
+    
+    # 複製 notes 檔案
+    notes_files = glob.glob(os.path.join(notes_dir, "*.txt"))
+    for notes_file in notes_files:
+        copy_if_not_exists(notes_file, google_dir)
+    
+    # 複製 srt 檔案
+    srt_files = glob.glob(os.path.join(srt_dir, "*.srt"))
+    for srt_file in srt_files:
+        copy_if_not_exists(srt_file, google_dir)
+    
+    if copied_count > 0:
+        logger.info(f"copy_files: 完成複製 {copied_count} 個檔案")
+    else:
+        logger.info("copy_files: 沒有需要複製的檔案")
+
 if __name__ == '__main__':
     logger.info("開始執行更新程序")
     df, new_df = update_list()
-    # download_mp3(df)  # Changed from download_audio
-    # transcribe_srt()
+    write_notes(df)
+    download_mp3(df)  # Changed from download_audio
+    transcribe_srt()
+    copy_files()
     logger.info("更新程序完成")
