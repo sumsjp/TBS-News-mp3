@@ -219,16 +219,31 @@ def write_notes(df):
     else:
         logger.info("write_notes: 沒有需要建立的筆記文件")
 
-def copy_files():
+def copy_files(df):
     """
-    將 mp3、notes、srt 目錄下的檔案複製到 google_dir
-    如果目標檔案已存在則跳過
-    """    
+    將最後8筆資料的 mp3、notes、srt 檔案複製到 google_dir
+    保留最後10筆資料的檔案，刪除更早的檔案
+    
+    Args:
+        df: 包含所有影片資訊的 DataFrame
+    """
+    import shutil
+    
     # 確保目標目錄存在
     os.makedirs(google_dir, exist_ok=True)
     
+    # 取得最後10筆資料，並複製全部10筆
+    last_10_df = df.tail(10)
+    copy_df = last_10_df  # 複製全部10筆
+    
+    # 建立保留檔案的標題集合（最後10筆）
+    keep_titles = set(last_10_df['title'])
+    # 建立要複製的檔案的標題集合（全部10筆）
+    copy_titles = set(copy_df['title'])
+    
     # 計數器
     copied_count = 0
+    deleted_count = 0
     
     # 複製函數
     def copy_if_not_exists(src_file, dst_dir):
@@ -244,25 +259,57 @@ def copy_files():
             except Exception as e:
                 logger.error(f"複製失敗 {filename}: {str(e)}")
     
-    # 複製 mp3 檔案
-    mp3_files = glob.glob(os.path.join(mp3_dir, "*.mp3"))
-    for mp3_file in mp3_files:
-        copy_if_not_exists(mp3_file, google_dir)
+    # 複製最後8筆的檔案
+    for _, row in copy_df.iterrows():
+        title = row['title']
+        
+        # 複製 mp3
+        mp3_file = os.path.join(mp3_dir, f"{title}.mp3")
+        if os.path.exists(mp3_file):
+            copy_if_not_exists(mp3_file, google_dir)
+            
+        # 複製 notes
+        notes_file = os.path.join(notes_dir, f"{title}.Notes.txt")
+        if os.path.exists(notes_file):
+            copy_if_not_exists(notes_file, google_dir)
+            
+        # 複製 srt
+        srt_file = os.path.join(srt_dir, f"{title}.srt")
+        if os.path.exists(srt_file):
+            copy_if_not_exists(srt_file, google_dir)
     
-    # 複製 notes 檔案
-    notes_files = glob.glob(os.path.join(notes_dir, "*.txt"))
-    for notes_file in notes_files:
-        copy_if_not_exists(notes_file, google_dir)
+    # 刪除不在最後10筆中的檔案
+    for filename in os.listdir(google_dir):
+        file_path = os.path.join(google_dir, filename)
+        
+        # 檢查是否為目標檔案類型
+        if not (filename.endswith('.mp3') or 
+                filename.endswith('.Notes.txt') or 
+                filename.endswith('.srt')):
+            continue
+            
+        # 從檔名中提取標題
+        if filename.endswith('.Notes.txt'):
+            title = filename[:-10]  # 移除 '.Notes.txt'
+        elif filename.endswith('.mp3') or filename.endswith('.srt'):
+            title = filename[:-4]   # 移除 '.mp3' 或 '.srt'
+            
+        # 如果不在最後10筆中，則刪除
+        if title not in keep_titles:
+            try:
+                os.remove(file_path)
+                deleted_count += 1
+                logger.info(f"已刪除：{filename}")
+            except Exception as e:
+                logger.error(f"刪除失敗 {filename}: {str(e)}")
     
-    # 複製 srt 檔案
-    srt_files = glob.glob(os.path.join(srt_dir, "*.srt"))
-    for srt_file in srt_files:
-        copy_if_not_exists(srt_file, google_dir)
-    
+    # 輸出處理結果
     if copied_count > 0:
         logger.info(f"copy_files: 完成複製 {copied_count} 個檔案")
-    else:
-        logger.info("copy_files: 沒有需要複製的檔案")
+    if deleted_count > 0:
+        logger.info(f"copy_files: 完成刪除 {deleted_count} 個檔案")
+    if copied_count == 0 and deleted_count == 0:
+        logger.info("copy_files: 沒有需要處理的檔案")
 
 if __name__ == '__main__':
     logger.info("開始執行更新程序")
@@ -270,5 +317,5 @@ if __name__ == '__main__':
     write_notes(df)
     download_mp3(df)  # Changed from download_audio
     transcribe_srt()
-    copy_files()
+    copy_files(df)
     logger.info("更新程序完成")
